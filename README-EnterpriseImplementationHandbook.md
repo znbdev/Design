@@ -79,6 +79,9 @@ Enterprise Implementation Handbook
         
         <!-- Monitoring 监控指标 -->
         <micrometer.version>1.12.0</micrometer.version>  <!-- Micrometer 应用监控指标收集 -->
+        
+        <!-- Internationalization 国际化 -->
+        <icu4j.version>74.2</icu4j.version>              <!-- ICU4J 国际化组件库，支持复杂的文本处理 -->
     </properties>
 
     <dependencyManagement>
@@ -229,6 +232,14 @@ Enterprise Implementation Handbook
                 <artifactId>micrometer-registry-prometheus</artifactId>
                 <version>${micrometer.version}</version>
                 <!-- Micrometer Prometheus 指标注册，用于应用监控 -->
+            </dependency>
+            
+            <!-- Internationalization 国际化相关依赖 -->
+            <dependency>
+                <groupId>com.ibm.icu</groupId>
+                <artifactId>icu4j</artifactId>
+                <version>${icu4j.version}</version>
+                <!-- ICU4J 国际化组件库，提供强大的文本处理、日期格式化、排序等功能 -->
             </dependency>
         </dependencies>
     </dependencyManagement>
@@ -2757,4 +2768,1307 @@ export class ErrorTracker {
 2. **认证授权:** JWT令牌的传递、验证、刷新机制是否完整？
 3. **错误处理:** 前后端错误码、错误信息是否统一？
 4. **监控告警:** 是否建立了完整的监控体系，包括性能监控、错误监控、业务监控？
+
+-----
+
+## 11. 国际化实现 (Internationalization - i18n)
+
+### 11.0 国际化依赖配置
+
+#### 11.0.1 后端依赖
+
+在 `pom.xml` 中添加以下国际化相关依赖：
+
+```xml
+<!-- 国际化核心依赖 -->
+<dependency>
+    <groupId>com.ibm.icu</groupId>
+    <artifactId>icu4j</artifactId>
+    <!-- ICU4J 提供强大的国际化功能，包括：
+         - 复杂的文本处理和断词
+         - 多语言日期、时间、数字格式化
+         - 货币格式化
+         - 排序和搜索
+         - 时区转换
+    -->
+</dependency>
+
+<!-- Spring Boot Web Starter（已包含基础国际化支持） -->
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-web</artifactId>
+    <!-- 包含：
+         - spring-context 中的 MessageSource
+         - LocaleResolver
+         - AcceptHeaderLocaleResolver
+    -->
+</dependency>
+```
+
+#### 11.0.2 前端依赖
+
+在 `package.json` 中添加以下国际化相关依赖：
+
+```json
+{
+  "dependencies": {
+    "react-i18next": "^13.5.0",
+    "i18next": "^23.7.6",
+    "i18next-browser-languagedetector": "^7.2.0",
+    "i18next-http-backend": "^2.4.2"
+  },
+  "devDependencies": {
+    "@types/i18next": "^13.0.0"
+  }
+}
+```
+
+**依赖说明：**
+- `react-i18next`: React 国际化框架，提供 Hooks 和组件
+- `i18next`: 核心国际化库
+- `i18next-browser-languagedetector`: 自动检测用户语言偏好
+- `i18next-http-backend`: 支持懒加载翻译文件
+
+#### 11.0.3 安装命令
+
+```bash
+# 后端依赖（Maven会自动下载）
+mvn clean install
+
+# 前端依赖
+npm install react-i18next i18next i18next-browser-languagedetector i18next-http-backend
+npm install -D @types/i18next
+```
+
+### 11.1 后端国际化实现
+
+#### 11.1.1 Spring Boot 国际化配置
+
+```java
+// config/MessageSourceConfig.java
+@Configuration
+public class MessageSourceConfig {
+
+    @Bean
+    public MessageSource messageSource() {
+        ResourceBundleMessageSource messageSource = new ResourceBundleMessageSource();
+        messageSource.setBasenames("i18n/messages", "i18n/validation", "i18n/error");
+        messageSource.setDefaultEncoding("UTF-8");
+        messageSource.setCacheSeconds(3600); // 缓存1小时
+        messageSource.setUseCodeAsDefaultMessage(true);
+        return messageSource;
+    }
+
+    @Bean
+    public LocaleResolver localeResolver() {
+        // 从请求头Accept-Language中获取语言信息
+        AcceptHeaderLocaleResolver resolver = new AcceptHeaderLocaleResolver();
+        resolver.setDefaultLocale(Locale.SIMPLIFIED_CHINESE);
+        resolver.setSupportedLocales(Arrays.asList(
+            Locale.SIMPLIFIED_CHINESE,
+            Locale.ENGLISH,
+            Locale.JAPANESE
+        ));
+        return resolver;
+    }
+}
+```
+
+#### 11.1.2 国际化资源文件
+
+```properties
+# src/main/resources/i18n/messages_zh_CN.properties
+# 通用消息
+common.success=操作成功
+common.error=操作失败
+common.not.found=资源不存在
+common.permission.denied=权限不足
+common.server.error=服务器内部错误
+
+# 用户相关
+user.login.success=登录成功
+user.login.failed=登录失败
+user.password.incorrect=密码错误
+user.account.locked=账户已被锁定
+user.not.exist=用户不存在
+
+# 订单相关
+order.create.success=订单创建成功
+order.create.failed=订单创建失败
+order.not.found=订单不存在
+order.status.invalid=订单状态无效
+order.payment.success=支付成功
+order.payment.failed=支付失败
+
+# 商品相关
+product.not.found=商品不存在
+product.stock.insufficient=库存不足
+product.price.changed=商品价格已发生变化
+```
+
+```properties
+# src/main/resources/i18n/messages_en_US.properties
+# Common messages
+common.success=Operation successful
+common.error=Operation failed
+common.not.found=Resource not found
+common.permission.denied=Permission denied
+common.server.error=Internal server error
+
+# User related
+user.login.success=Login successful
+user.login.failed=Login failed
+user.password.incorrect=Incorrect password
+user.account.locked=Account is locked
+user.not.exist=User does not exist
+
+# Order related
+order.create.success=Order created successfully
+order.create.failed=Failed to create order
+order.not.found=Order not found
+order.status.invalid=Invalid order status
+order.payment.success=Payment successful
+order.payment.failed=Payment failed
+
+# Product related
+product.not.found=Product not found
+product.stock.insufficient=Insufficient stock
+product.price.changed=Product price has changed
+```
+
+```properties
+# src/main/resources/i18n/messages_ja_JP.properties
+# 共通メッセージ
+common.success=操作成功
+common.error=操作失敗
+common.not.found=リソースが存在しません
+common.permission.denied=権限がありません
+common.server.error=サーバー内部エラー
+
+# ユーザー関連
+user.login.success=ログイン成功
+user.login.failed=ログイン失敗
+user.password.incorrect=パスワードが正しくありません
+user.account.locked=アカウントがロックされています
+user.not.exist=ユーザーが存在しません
+
+# 注文関連
+order.create.success=注文作成成功
+order.create.failed=注文作成失敗
+order.not.found=注文が存在しません
+order.status.invalid=注文ステータスが無効です
+order.payment.success=支払い成功
+order.payment.failed=支払い失敗
+```
+
+#### 11.1.3 国际化工具类
+
+```java
+// util/I18nUtils.java
+@Component
+public class I18nUtils {
+
+    @Autowired
+    private MessageSource messageSource;
+
+    /**
+     * 获取国际化消息
+     */
+    public String getMessage(String code, Object... args) {
+        return getMessage(code, null, args);
+    }
+
+    /**
+     * 获取指定语言的国际化消息
+     */
+    public String getMessage(String code, Locale locale, Object... args) {
+        if (locale == null) {
+            locale = LocaleContextHolder.getLocale();
+        }
+        try {
+            return messageSource.getMessage(code, args, locale);
+        } catch (NoSuchMessageException e) {
+            return code; // 如果找不到消息，返回code
+        }
+    }
+
+    /**
+     * 获取验证错误消息
+     */
+    public String getValidationMessage(String field, String constraint, Object... args) {
+        String code = String.format("validation.%s.%s", field, constraint);
+        return getMessage(code, args);
+    }
+
+    /**
+     * 获取错误消息
+     */
+    public String getErrorMessage(String errorCode, Object... args) {
+        String code = String.format("error.%s", errorCode);
+        return getMessage(code, args);
+    }
+}
+```
+
+#### 11.1.4 国际化异常处理
+
+```java
+// exception/I18nBizException.java
+public class I18nBizException extends RuntimeException {
+    
+    private final String messageCode;
+    private final Object[] args;
+    
+    public I18nBizException(String messageCode) {
+        this(messageCode, null);
+    }
+    
+    public I18nBizException(String messageCode, Object[] args) {
+        super(messageCode);
+        this.messageCode = messageCode;
+        this.args = args;
+    }
+    
+    public String getMessageCode() {
+        return messageCode;
+    }
+    
+    public Object[] getArgs() {
+        return args;
+    }
+}
+
+// exception/I18nGlobalExceptionHandler.java
+@RestControllerAdvice
+public class I18nGlobalExceptionHandler {
+
+    @Autowired
+    private I18nUtils i18nUtils;
+
+    @ExceptionHandler(I18nBizException.class)
+    public Result<Void> handleI18nBizException(I18nBizException e) {
+        String message = i18nUtils.getMessage(e.getMessageCode(), e.getArgs());
+        return Result.fail("BIZ_ERROR", message);
+    }
+
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public Result<Void> handleValidationException(MethodArgumentNotValidException e) {
+        List<String> errors = new ArrayList<>();
+        for (FieldError error : e.getBindingResult().getFieldErrors()) {
+            String message = i18nUtils.getMessage(error.getDefaultMessage(), error.getArguments());
+            errors.add(error.getField() + ": " + message);
+        }
+        return Result.fail("VALIDATION_ERROR", String.join(", ", errors));
+    }
+}
+```
+
+#### 11.1.5 Controller中使用国际化
+
+```java
+// controller/I18nOrderController.java
+@RestController
+@RequestMapping("/api/i18n/orders")
+@Tag(name = "订单管理(国际化)", description = "支持多语言的订单接口")
+public class I18nOrderController {
+
+    @Autowired
+    private OrderService orderService;
+    
+    @Autowired
+    private I18nUtils i18nUtils;
+
+    @PostMapping
+    @Operation(summary = "创建订单", description = "创建新的订单")
+    public Result<OrderResponse> createOrder(
+            @Valid @RequestBody CreateOrderRequest request,
+            Locale locale) {
+        
+        try {
+            Order order = orderService.createOrder(request);
+            String successMsg = i18nUtils.getMessage("order.create.success", locale);
+            return Result.success(OrderResponse.from(order), successMsg);
+        } catch (InsufficientStockException e) {
+            String errorMsg = i18nUtils.getMessage("product.stock.insufficient", locale, e.getProductName());
+            throw new I18nBizException("product.stock.insufficient", new Object[]{e.getProductName()});
+        }
+    }
+
+    @GetMapping("/{id}")
+    @Operation(summary = "查询订单", description = "根据ID查询订单详情")
+    public Result<OrderResponse> getOrder(@PathVariable Long id, Locale locale) {
+        Order order = orderService.getOrder(id);
+        if (order == null) {
+            String errorMsg = i18nUtils.getMessage("order.not.found", locale);
+            throw new I18nBizException("order.not.found");
+        }
+        return Result.success(OrderResponse.from(order));
+    }
+}
+```
+
+### 11.2 前端国际化实现
+
+#### 11.2.1 React-i18next 配置
+
+```typescript
+// src/i18n/index.ts
+import i18n from 'i18next';
+import { initReactI18next } from 'react-i18next';
+import Backend from 'i18next-http-backend';
+import LanguageDetector from 'i18next-browser-languagedetector';
+
+// 语言资源
+import zhCN from './locales/zh-CN.json';
+import enUS from './locales/en-US.json';
+import jaJP from './locales/ja-JP.json';
+
+const resources = {
+  'zh-CN': { translation: zhCN },
+  'en-US': { translation: enUS },
+  'ja-JP': { translation: jaJP },
+};
+
+i18n
+  .use(Backend) // 懒加载翻译文件
+  .use(LanguageDetector) // 自动检测用户语言
+  .use(initReactI18next) // 绑定react-i18next
+  .init({
+    resources,
+    fallbackLng: 'zh-CN', // 默认语言
+    debug: process.env.NODE_ENV === 'development',
+    
+    interpolation: {
+      escapeValue: false, // React已经默认转义
+    },
+    
+    detection: {
+      order: ['localStorage', 'navigator', 'htmlTag'],
+      caches: ['localStorage']
+    },
+    
+    backend: {
+      loadPath: '/locales/{{lng}}/{{ns}}.json'
+    },
+  });
+
+export default i18n;
+```
+
+#### 11.2.2 语言资源文件
+
+```json
+{
+  "common": {
+    "save": "保存",
+    "cancel": "取消",
+    "delete": "删除",
+    "edit": "编辑",
+    "add": "添加",
+    "search": "搜索",
+    "reset": "重置",
+    "submit": "提交",
+    "confirm": "确认",
+    "loading": "加载中...",
+    "noData": "暂无数据",
+    "operationSuccess": "操作成功",
+    "operationFailed": "操作失败",
+    "confirmDelete": "确认删除此条记录？"
+  },
+  "menu": {
+    "dashboard": "仪表板",
+    "productManagement": "商品管理",
+    "orderManagement": "订单管理",
+    "userManagement": "用户管理",
+    "systemSettings": "系统设置"
+  },
+  "login": {
+    "title": "用户登录",
+    "username": "用户名",
+    "password": "密码",
+    "rememberMe": "记住我",
+    "loginBtn": "登录",
+    "usernameRequired": "请输入用户名",
+    "passwordRequired": "请输入密码",
+    "loginFailed": "登录失败，请检查用户名和密码"
+  },
+  "product": {
+    "title": "商品管理",
+    "name": "商品名称",
+    "price": "价格",
+    "stock": "库存",
+    "description": "描述",
+    "status": "状态",
+    "addProduct": "添加商品",
+    "editProduct": "编辑商品",
+    "deleteProduct": "删除商品",
+    "nameRequired": "商品名称不能为空",
+    "priceRequired": "价格不能为空",
+    "priceInvalid": "价格格式不正确",
+    "stockRequired": "库存不能为空",
+    "stockInvalid": "库存必须为正整数"
+  },
+  "order": {
+    "title": "订单管理",
+    "orderId": "订单号",
+    "customer": "客户",
+    "totalAmount": "总金额",
+    "status": "状态",
+    "createTime": "创建时间",
+    "paymentTime": "支付时间",
+    "createOrder": "创建订单",
+    "cancelOrder": "取消订单",
+    "payOrder": "支付订单",
+    "orderStatus": {
+      "PENDING_PAYMENT": "待支付",
+      "PAID": "已支付",
+      "SHIPPED": "已发货",
+      "DELIVERED": "已送达",
+      "COMPLETED": "已完成",
+      "CANCELLED": "已取消"
+    }
+  },
+  "validation": {
+    "required": "{{field}}不能为空",
+    "minLength": "{{field}}长度不能少于{{min}}位",
+    "maxLength": "{{field}}长度不能超过{{max}}位",
+    "email": "邮箱格式不正确",
+    "phone": "手机号格式不正确"
+  }
+}
+```
+
+```json
+{
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "add": "Add",
+    "search": "Search",
+    "reset": "Reset",
+    "submit": "Submit",
+    "confirm": "Confirm",
+    "loading": "Loading...",
+    "noData": "No Data",
+    "operationSuccess": "Operation Successful",
+    "operationFailed": "Operation Failed",
+    "confirmDelete": "Are you sure to delete this record?"
+  },
+  "menu": {
+    "dashboard": "Dashboard",
+    "productManagement": "Product Management",
+    "orderManagement": "Order Management",
+    "userManagement": "User Management",
+    "systemSettings": "System Settings"
+  },
+  "login": {
+    "title": "User Login",
+    "username": "Username",
+    "password": "Password",
+    "rememberMe": "Remember Me",
+    "loginBtn": "Login",
+    "usernameRequired": "Please enter username",
+    "passwordRequired": "Please enter password",
+    "loginFailed": "Login failed, please check username and password"
+  },
+  "product": {
+    "title": "Product Management",
+    "name": "Product Name",
+    "price": "Price",
+    "stock": "Stock",
+    "description": "Description",
+    "status": "Status",
+    "addProduct": "Add Product",
+    "editProduct": "Edit Product",
+    "deleteProduct": "Delete Product",
+    "nameRequired": "Product name is required",
+    "priceRequired": "Price is required",
+    "priceInvalid": "Price format is invalid",
+    "stockRequired": "Stock is required",
+    "stockInvalid": "Stock must be a positive integer"
+  },
+  "order": {
+    "title": "Order Management",
+    "orderId": "Order ID",
+    "customer": "Customer",
+    "totalAmount": "Total Amount",
+    "status": "Status",
+    "createTime": "Create Time",
+    "paymentTime": "Payment Time",
+    "createOrder": "Create Order",
+    "cancelOrder": "Cancel Order",
+    "payOrder": "Pay Order",
+    "orderStatus": {
+      "PENDING_PAYMENT": "Pending Payment",
+      "PAID": "Paid",
+      "SHIPPED": "Shipped",
+      "DELIVERED": "Delivered",
+      "COMPLETED": "Completed",
+      "CANCELLED": "Cancelled"
+    }
+  },
+  "validation": {
+    "required": "{{field}} is required",
+    "minLength": "{{field}} must be at least {{min}} characters",
+    "maxLength": "{{field}} cannot exceed {{max}} characters",
+    "email": "Email format is invalid",
+    "phone": "Phone format is invalid"
+  }
+}
+```
+
+```json
+{
+  "common": {
+    "save": "保存",
+    "cancel": "キャンセル",
+    "delete": "削除",
+    "edit": "編集",
+    "add": "追加",
+    "search": "検索",
+    "reset": "リセット",
+    "submit": "送信",
+    "confirm": "確認",
+    "loading": "読み込み中...",
+    "noData": "データがありません",
+    "operationSuccess": "操作が成功しました",
+    "operationFailed": "操作が失敗しました",
+    "confirmDelete": "このレコードを削除してもよろしいですか？"
+  },
+  "menu": {
+    "dashboard": "ダッシュボード",
+    "productManagement": "商品管理",
+    "orderManagement": "注文管理",
+    "userManagement": "ユーザー管理",
+    "systemSettings": "システム設定"
+  },
+  "login": {
+    "title": "ユーザーログイン",
+    "username": "ユーザー名",
+    "password": "パスワード",
+    "rememberMe": "ログイン状態を保持",
+    "loginBtn": "ログイン",
+    "usernameRequired": "ユーザー名を入力してください",
+    "passwordRequired": "パスワードを入力してください",
+    "loginFailed": "ログインに失敗しました。ユーザー名とパスワードを確認してください"
+  },
+  "product": {
+    "title": "商品管理",
+    "name": "商品名",
+    "price": "価格",
+    "stock": "在庫",
+    "description": "説明",
+    "status": "ステータス",
+    "addProduct": "商品を追加",
+    "editProduct": "商品を編集",
+    "deleteProduct": "商品を削除",
+    "nameRequired": "商品名は必須です",
+    "priceRequired": "価格は必須です",
+    "priceInvalid": "価格の形式が正しくありません",
+    "stockRequired": "在庫は必須です",
+    "stockInvalid": "在庫は正の整数である必要があります"
+  },
+  "order": {
+    "title": "注文管理",
+    "orderId": "注文ID",
+    "customer": "顧客",
+    "totalAmount": "合計金額",
+    "status": "ステータス",
+    "createTime": "作成時間",
+    "paymentTime": "支払い時間",
+    "createOrder": "注文を作成",
+    "cancelOrder": "注文をキャンセル",
+    "payOrder": "注文を支払う",
+    "orderStatus": {
+      "PENDING_PAYMENT": "支払い待ち",
+      "PAID": "支払い済み",
+      "SHIPPED": "発送済み",
+      "DELIVERED": "配達済み",
+      "COMPLETED": "完了",
+      "CANCELLED": "キャンセル済み"
+    }
+  },
+  "validation": {
+    "required": "{{field}}は必須です",
+    "minLength": "{{field}}は{{min}}文字以上である必要があります",
+    "maxLength": "{{field}}は{{max}}文字を超えることはできません",
+    "email": "メールの形式が正しくありません",
+    "phone": "電話番号の形式が正しくありません"
+  }
+}
+```
+
+#### 11.2.3 语言切换组件
+
+```typescript
+// src/components/LanguageSwitcher/index.tsx
+import React from 'react';
+import { Select } from 'antd';
+import { useTranslation } from 'react-i18next';
+import { GlobalOutlined } from '@ant-design/icons';
+
+const { Option } = Select;
+
+const languages = [
+  { key: 'zh-CN', name: '简体中文', flag: '🇨🇳' },
+  { key: 'en-US', name: 'English', flag: '🇺🇸' },
+  { key: 'ja-JP', name: '日本語', flag: '🇯🇵' },
+];
+
+const LanguageSwitcher: React.FC = () => {
+  const { i18n } = useTranslation();
+
+  const handleLanguageChange = (value: string) => {
+    i18n.changeLanguage(value);
+    localStorage.setItem('language', value);
+  };
+
+  return (
+    <Select
+      value={i18n.language}
+      onChange={handleLanguageChange}
+      style={{ width: 120 }}
+      suffixIcon={<GlobalOutlined />}
+    >
+      {languages.map(lang => (
+        <Option key={lang.key} value={lang.key}>
+          <span style={{ marginRight: 8 }}>{lang.flag}</span>
+          {lang.name}
+        </Option>
+      ))}
+    </Select>
+  );
+};
+
+export default LanguageSwitcher;
+```
+
+#### 11.2.4 国际化Hook封装
+
+```typescript
+// src/hooks/useI18n.ts
+import { useTranslation } from 'react-i18next';
+
+export const useI18n = () => {
+  const { t, i18n } = useTranslation();
+
+  return {
+    t,
+    currentLanguage: i18n.language,
+    changeLanguage: i18n.changeLanguage,
+    
+    // 格式化消息，支持变量替换
+    formatMessage: (key: string, values?: Record<string, any>) => {
+      return t(key, values);
+    },
+    
+    // 获取当前语言环境
+    getLocale: () => {
+      const langMap: Record<string, string> = {
+        'zh-CN': 'zh-CN',
+        'en-US': 'en-US',
+        'ja-JP': 'ja-JP',
+      };
+      return langMap[i18n.language] || 'zh-CN';
+    },
+    
+    // 判断是否为RTL语言
+    isRTL: () => {
+      const rtlLanguages = ['ar', 'he', 'fa'];
+      return rtlLanguages.includes(i18n.language.split('-')[0]);
+    },
+  };
+};
+```
+
+#### 11.2.5 在组件中使用国际化
+
+```typescript
+// src/pages/Login/index.tsx
+import React from 'react';
+import { Form, Input, Button, Checkbox, Card, message } from 'antd';
+import { UserOutlined, LockOutlined } from '@ant-design/icons';
+import { useI18n } from '@/hooks/useI18n';
+import LanguageSwitcher from '@/components/LanguageSwitcher';
+import { useAuth } from '@/hooks/useAuth';
+
+const Login: React.FC = () => {
+  const { t, formatMessage } = useI18n();
+  const { login, loading } = useAuth();
+  const [form] = Form.useForm();
+
+  const onFinish = async (values: any) => {
+    try {
+      await login(values.username, values.password);
+      message.success(t('login.loginSuccess', '登录成功'));
+    } catch (error) {
+      message.error(t('login.loginFailed'));
+    }
+  };
+
+  return (
+    <div className="login-container">
+      <div className="language-switcher">
+        <LanguageSwitcher />
+      </div>
+      
+      <Card title={t('login.title')} className="login-card">
+        <Form
+          form={form}
+          name="login"
+          onFinish={onFinish}
+          autoComplete="off"
+        >
+          <Form.Item
+            name="username"
+            rules={[
+              { required: true, message: t('login.usernameRequired') },
+            ]}
+          >
+            <Input
+              prefix={<UserOutlined />}
+              placeholder={t('login.username')}
+            />
+          </Form.Item>
+
+          <Form.Item
+            name="password"
+            rules={[
+              { required: true, message: t('login.passwordRequired') },
+            ]}
+          >
+            <Input.Password
+              prefix={<LockOutlined />}
+              placeholder={t('login.password')}
+            />
+          </Form.Item>
+
+          <Form.Item>
+            <Form.Item name="remember" valuePropName="checked" noStyle>
+              <Checkbox>{t('login.rememberMe')}</Checkbox>
+            </Form.Item>
+          </Form.Item>
+
+          <Form.Item>
+            <Button
+              type="primary"
+              htmlType="submit"
+              loading={loading}
+              block
+            >
+              {t('login.loginBtn')}
+            </Button>
+          </Form.Item>
+        </Form>
+      </Card>
+    </div>
+  );
+};
+
+export default Login;
+```
+
+#### 11.2.6 表格组件国际化
+
+```typescript
+// src/pages/Product/ProductList.tsx
+import React from 'react';
+import { Table, Button, Space, Popconfirm, message } from 'antd';
+import { useI18n } from '@/hooks/useI18n';
+import { EditOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons';
+
+const ProductList: React.FC = () => {
+  const { t } = useI18n();
+
+  const columns = [
+    {
+      title: t('product.name'),
+      dataIndex: 'name',
+      key: 'name',
+    },
+    {
+      title: t('product.price'),
+      dataIndex: 'price',
+      key: 'price',
+      render: (price: number) => `¥${price.toFixed(2)}`,
+    },
+    {
+      title: t('product.stock'),
+      dataIndex: 'stock',
+      key: 'stock',
+    },
+    {
+      title: t('common.operation'),
+      key: 'action',
+      render: (_, record: any) => (
+        <Space size="middle">
+          <Button
+            type="link"
+            icon={<EditOutlined />}
+            onClick={() => handleEdit(record)}
+          >
+            {t('common.edit')}
+          </Button>
+          <Popconfirm
+            title={t('common.confirmDelete')}
+            onConfirm={() => handleDelete(record.id)}
+            okText={t('common.confirm')}
+            cancelText={t('common.cancel')}
+          >
+            <Button
+              type="link"
+              danger
+              icon={<DeleteOutlined />}
+            >
+              {t('common.delete')}
+            </Button>
+          </Popconfirm>
+        </Space>
+      ),
+    },
+  ];
+
+  const handleAdd = () => {
+    // 添加商品逻辑
+  };
+
+  const handleEdit = (record: any) => {
+    // 编辑商品逻辑
+  };
+
+  const handleDelete = async (id: number) => {
+    try {
+      // 删除API调用
+      message.success(t('common.operationSuccess'));
+    } catch (error) {
+      message.error(t('common.operationFailed'));
+    }
+  };
+
+  return (
+    <div className="product-list">
+      <div className="table-header">
+        <Button
+          type="primary"
+          icon={<PlusOutlined />}
+          onClick={handleAdd}
+        >
+          {t('product.addProduct')}
+        </Button>
+      </div>
+      
+      <Table
+        columns={columns}
+        dataSource={[]}
+        rowKey="id"
+        locale={{
+          emptyText: t('common.noData'),
+        }}
+      />
+    </div>
+  );
+};
+
+export default ProductList;
+```
+
+### 11.3 日期和数字格式化
+
+#### 11.3.1 后端格式化配置
+
+```java
+// config/FormatterConfig.java
+@Configuration
+public class FormatterConfig {
+
+    @Bean
+    public FormattingConversionService conversionService() {
+        DefaultFormattingConversionService conversionService = new DefaultFormattingConversionService();
+        
+        // 添加日期格式化器
+        DateTimeFormatterRegistrar dateTimeRegistrar = new DateTimeFormatterRegistrar();
+        dateTimeRegistrar.setDateFormatter(DateTimeFormatter.ofPattern("yyyy-MM-dd"));
+        dateTimeRegistrar.setDateTimeFormatter(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+        dateTimeRegistrar.setTimeFormatter(DateTimeFormatter.ofPattern("HH:mm:ss"));
+        dateTimeRegistrar.registerFormatters(conversionService);
+        
+        // 添加数字格式化器
+        NumberFormatRegistrar numberRegistrar = new NumberFormatRegistrar();
+        numberRegistrar.registerFormatters(conversionService);
+        
+        return conversionService;
+    }
+
+    @Bean
+    public LocaleFormatter localeFormatter() {
+        return new LocaleFormatter();
+    }
+}
+
+// util/DateTimeUtils.java
+@Component
+public class DateTimeUtils {
+
+    @Autowired
+    private MessageSource messageSource;
+
+    /**
+     * 根据语言环境格式化日期
+     */
+    public String formatDateTime(LocalDateTime dateTime, Locale locale) {
+        if (dateTime == null) {
+            return "";
+        }
+        
+        String pattern = getMessage("datetime.format", locale, "yyyy-MM-dd HH:mm:ss");
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern(pattern);
+        return dateTime.format(formatter);
+    }
+
+    /**
+     * 根据语言环境格式化数字
+     */
+    public String formatNumber(Number number, Locale locale) {
+        if (number == null) {
+            return "";
+        }
+        
+        NumberFormat format = NumberFormat.getInstance(locale);
+        return format.format(number);
+    }
+
+    /**
+     * 根据语言环境格式化货币
+     */
+    public String formatCurrency(BigDecimal amount, Locale locale) {
+        if (amount == null) {
+            return "";
+        }
+        
+        NumberFormat format = NumberFormat.getCurrencyInstance(locale);
+        return format.format(amount);
+    }
+
+    private String getMessage(String code, Locale locale, String defaultValue) {
+        try {
+            return messageSource.getMessage(code, null, locale);
+        } catch (NoSuchMessageException e) {
+            return defaultValue;
+        }
+    }
+}
+```
+
+#### 11.3.2 前端格式化工具
+
+```typescript
+// src/utils/format.ts
+import { useI18n } from '@/hooks/useI18n';
+
+export const useFormat = () => {
+  const { getLocale } = useI18n();
+
+  // 格式化日期
+  const formatDate = (date: Date | string, options?: Intl.DateTimeFormatOptions) => {
+    const locale = getLocale();
+    const defaultOptions: Intl.DateTimeFormatOptions = {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      ...options,
+    };
+    
+    return new Intl.DateTimeFormat(locale, defaultOptions).format(
+      typeof date === 'string' ? new Date(date) : date
+    );
+  };
+
+  // 格式化时间
+  const formatTime = (date: Date | string, options?: Intl.DateTimeFormatOptions) => {
+    const locale = getLocale();
+    const defaultOptions: Intl.DateTimeFormatOptions = {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      ...options,
+    };
+    
+    return new Intl.DateTimeFormat(locale, defaultOptions).format(
+      typeof date === 'string' ? new Date(date) : date
+    );
+  };
+
+  // 格式化日期时间
+  const formatDateTime = (date: Date | string, options?: Intl.DateTimeFormatOptions) => {
+    const locale = getLocale();
+    const defaultOptions: Intl.DateTimeFormatOptions = {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      ...options,
+    };
+    
+    return new Intl.DateTimeFormat(locale, defaultOptions).format(
+      typeof date === 'string' ? new Date(date) : date
+    );
+  };
+
+  // 格式化数字
+  const formatNumber = (num: number, options?: Intl.NumberFormatOptions) => {
+    const locale = getLocale();
+    return new Intl.NumberFormat(locale, options).format(num);
+  };
+
+  // 格式化货币
+  const formatCurrency = (amount: number, currency: string = 'CNY') => {
+    const locale = getLocale();
+    return new Intl.NumberFormat(locale, {
+      style: 'currency',
+      currency,
+    }).format(amount);
+  };
+
+  // 格式化百分比
+  const formatPercent = (num: number, options?: Intl.NumberFormatOptions) => {
+    const locale = getLocale();
+    return new Intl.NumberFormat(locale, {
+      style: 'percent',
+      ...options,
+    }).format(num);
+  };
+
+  return {
+    formatDate,
+    formatTime,
+    formatDateTime,
+    formatNumber,
+    formatCurrency,
+    formatPercent,
+  };
+};
+```
+
+### 11.4 国际化测试
+
+#### 11.4.1 后端国际化测试
+
+```java
+// test/I18nIntegrationTest.java
+@SpringBootTest
+@AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
+public class I18nIntegrationTest {
+
+    @Autowired
+    private TestRestTemplate restTemplate;
+
+    @Autowired
+    private I18nUtils i18nUtils;
+
+    @Test
+    public void testChineseMessage() {
+        Locale.setDefault(Locale.SIMPLIFIED_CHINESE);
+        String message = i18nUtils.getMessage("order.create.success");
+        assertEquals("订单创建成功", message);
+    }
+
+    @Test
+    public void testEnglishMessage() {
+        Locale.setDefault(Locale.ENGLISH);
+        String message = i18nUtils.getMessage("order.create.success");
+        assertEquals("Order created successfully", message);
+    }
+
+    @Test
+    public void testApiWithAcceptLanguage() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setAcceptLanguage(Locale.LanguageRange.parse("en-US"));
+        HttpEntity<String> entity = new HttpEntity<>(headers);
+        
+        ResponseEntity<String> response = restTemplate.exchange(
+            "/api/i18n/orders/1",
+            HttpMethod.GET,
+            entity,
+            String.class
+        );
+        
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        // 验证响应中的消息是英文
+    }
+}
+```
+
+#### 11.4.2 前端国际化测试
+
+```typescript
+// src/__tests__/i18n.test.tsx
+import React from 'react';
+import { render, screen, fireEvent } from '@testing-library/react';
+import { I18nextProvider } from 'react-i18next';
+import i18n from '@/i18n';
+import Login from '@/pages/Login';
+
+const renderWithI18n = (component: React.ReactElement, language = 'zh-CN') => {
+  i18n.changeLanguage(language);
+  return render(
+    <I18nextProvider i18n={i18n}>
+      {component}
+    </I18nextProvider>
+  );
+};
+
+describe('Login Page Internationalization', () => {
+  test('renders in Chinese', () => {
+    renderWithI18n(<Login />, 'zh-CN');
+    
+    expect(screen.getByText('用户登录')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('用户名')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('密码')).toBeInTheDocument();
+    expect(screen.getByText('登录')).toBeInTheDocument();
+  });
+
+  test('renders in English', () => {
+    renderWithI18n(<Login />, 'en-US');
+    
+    expect(screen.getByText('User Login')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Username')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Password')).toBeInTheDocument();
+    expect(screen.getByText('Login')).toBeInTheDocument();
+  });
+
+  test('language switcher works', () => {
+    renderWithI18n(<Login />, 'zh-CN');
+    
+    const languageSwitcher = screen.getByRole('combobox');
+    fireEvent.change(languageSwitcher, { target: { value: 'en-US' } });
+    
+    expect(screen.getByText('User Login')).toBeInTheDocument();
+  });
+});
+```
+
+### 11.5 部署配置
+
+#### 11.5.1 Nginx 配置支持多语言
+
+```nginx
+# nginx.conf
+server {
+    listen 80;
+    server_name your-domain.com;
+    
+    # 设置语言相关的响应头
+    location / {
+        root /usr/share/nginx/html;
+        index index.html;
+        try_files $uri $uri/ /index.html;
+        
+        # 添加语言相关的响应头
+        add_header Content-Language $http_accept_language always;
+    }
+    
+    # 静态资源缓存
+    location /locales/ {
+        root /usr/share/nginx/html;
+        expires 1d;
+        add_header Cache-Control "public, immutable";
+    }
+    
+    # API代理
+    location /api/ {
+        proxy_pass http://backend:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header Accept-Language $http_accept_language;
+    }
+}
+```
+
+#### 11.5.2 Docker Compose 配置
+
+```yaml
+# docker-compose.yml
+version: '3.8'
+
+services:
+  backend:
+    build: ./backend
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - JAVA_OPTS=-Xms512m -Xmx1024m
+    volumes:
+      - ./backend/src/main/resources/i18n:/app/i18n
+    depends_on:
+      - mysql
+      - redis
+
+  frontend:
+    build: ./frontend
+    volumes:
+      - ./frontend/public/locales:/usr/share/nginx/html/locales
+    depends_on:
+      - backend
+
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: enterprise_app
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./frontend/dist:/usr/share/nginx/html
+    depends_on:
+      - frontend
+      - backend
+
+volumes:
+  mysql_data:
+  redis_data:
+```
+
+### 11.6 最佳实践与注意事项
+
+#### 11.6.1 性能优化
+1. **懒加载翻译文件**: 使用 `i18next-http-backend` 按需加载语言包
+2. **缓存策略**: 合理设置翻译文件的缓存时间
+3. **代码分割**: 将不同语言的资源文件分离打包
+4. **CDN部署**: 将翻译文件部署到CDN加速访问
+
+#### 11.6.2 开发规范
+1. **命名规范**: 使用有意义的key名称，避免缩写
+2. **参数化**: 支持变量插值的翻译文本
+3. **复数形式**: 正确处理单复数形式的差异
+4. **文本长度**: 考虑不同语言文本长度的差异
+
+#### 11.6.3 质量保证
+1. **翻译质量**: 确保专业术语的准确翻译
+2. **文化适配**: 考虑不同地区的文化差异
+3. **测试覆盖**: 对所有支持的语言进行测试
+4. **持续集成**: 在CI/CD流程中加入国际化检查
+
+#### 11.6.4 监控与维护
+1. **缺失检测**: 监控缺失的翻译key
+2. **使用统计**: 跟踪各语言版本的使用情况
+3. **更新机制**: 建立翻译内容的更新和审核流程
+4. **版本管理**: 对翻译文件进行版本控制
+
+通过以上完整的国际化实现方案，可以确保企业级应用能够支持多语言环境，为不同地区的用户提供本地化的使用体验。
 
