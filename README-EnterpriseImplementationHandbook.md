@@ -971,11 +971,1004 @@ ENTRYPOINT ["java", "-XX:+UseContainerSupport", "-XX:MaxRAMPercentage=75.0", "-j
 
 -----
 
-## 9. 前端技术实现 (Frontend Implementation)
+## 9. 核心业务模块实现 (Core Business Modules)
 
-### 9.1 技术栈选择与版本兼容性
+### 9.1 商品管理模块 (Product Management)
 
-#### 9.1.1 推荐前端技术栈
+#### 9.1.1 领域模型设计
+
+```java
+// domain/model/Product.java
+@Entity
+@Table(name = "products")
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class Product {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    
+    @Column(nullable = false, length = 100)
+    private String name;                    // 商品名称
+    
+    @Column(nullable = false, length = 500)
+    private String description;             // 商品描述
+    
+    @Column(nullable = false, precision = 10, scale = 2)
+    private BigDecimal price;               // 商品价格
+    
+    @Column(nullable = false)
+    private Integer stock;                   // 库存数量
+    
+    @Column(nullable = false)
+    private String category;                // 商品分类
+    
+    @Column(length = 1000)
+    private String images;                   // 商品图片URL，多个用逗号分隔
+    
+    @Column(nullable = false)
+    private Boolean status;                  // 商品状态：true-上架，false-下架
+    
+    @CreatedDate
+    private LocalDateTime createTime;
+    
+    @LastModifiedDate
+    private LocalDateTime updateTime;
+    
+    @Version
+    private Long version;                    // 乐观锁版本号
+}
+```
+
+#### 9.1.2 商品管理API实现
+
+```java
+// api/controller/ProductController.java
+@RestController
+@RequestMapping("/api/products")
+@Tag(name = "商品管理", description = "商品相关的接口")
+@Validated
+public class ProductController {
+    
+    @Autowired
+    private ProductService productService;
+    
+    @PostMapping
+    @Operation(summary = "创建商品", description = "创建新的商品")
+    @PreAuthorize("hasRole('ADMIN')")
+    public Result<ProductResponse> createProduct(
+            @Valid @RequestBody ProductRequest request) {
+        Product product = productService.createProduct(request);
+        return Result.success(ProductResponse.from(product));
+    }
+    
+    @PutMapping("/{id}")
+    @Operation(summary = "更新商品", description = "更新商品信息")
+    @PreAuthorize("hasRole('ADMIN')")
+    public Result<ProductResponse> updateProduct(
+            @PathVariable Long id,
+            @Valid @RequestBody ProductRequest request) {
+        Product product = productService.updateProduct(id, request);
+        return Result.success(ProductResponse.from(product));
+    }
+    
+    @GetMapping("/{id}")
+    @Operation(summary = "查询商品", description = "根据ID查询商品详情")
+    public Result<ProductResponse> getProduct(@PathVariable Long id) {
+        Product product = productService.getProduct(id);
+        return Result.success(ProductResponse.from(product));
+    }
+    
+    @GetMapping
+    @Operation(summary = "商品列表", description = "分页查询商品列表")
+    public Result<PageResult<ProductResponse>> getProducts(
+            @RequestParam(defaultValue = "1") Integer page,
+            @RequestParam(defaultValue = "10") Integer size,
+            @RequestParam(required = false) String category,
+            @RequestParam(required = false) String keyword) {
+        
+        ProductQuery query = ProductQuery.builder()
+                .page(page)
+                .size(size)
+                .category(category)
+                .keyword(keyword)
+                .build();
+                
+        PageResult<Product> result = productService.getProducts(query);
+        List<ProductResponse> responses = result.getData().stream()
+                .map(ProductResponse::from)
+                .collect(Collectors.toList());
+                
+        return Result.success(new PageResult<>(responses, result.getTotal()));
+    }
+    
+    @PutMapping("/{id}/stock")
+    @Operation(summary = "更新库存", description = "更新商品库存")
+    @PreAuthorize("hasRole('ADMIN')")
+    public Result<Void> updateStock(
+            @PathVariable Long id,
+            @Valid @RequestBody StockUpdateRequest request) {
+        productService.updateStock(id, request.getQuantity());
+        return Result.success();
+    }
+    
+    @PutMapping("/{id}/status")
+    @Operation(summary = "更新状态", description = "上架/下架商品")
+    @PreAuthorize("hasRole('ADMIN')")
+    public Result<Void> updateStatus(
+            @PathVariable Long id,
+            @RequestParam Boolean status) {
+        productService.updateStatus(id, status);
+        return Result.success();
+    }
+}
+```
+
+#### 9.1.3 商品服务实现
+
+```java
+// app/service/ProductService.java
+@Service
+@Transactional
+public class ProductService {
+    
+    @Autowired
+    private ProductRepository productRepository;
+    
+    @Autowired
+    private ProductAssembler productAssembler;
+    
+    public Product createProduct(ProductRequest request) {
+        // 检查商品名称是否重复
+        if (productRepository.existsByName(request.getName())) {
+            throw new BizException("P0001", "商品名称已存在");
+        }
+        
+        Product product = productAssembler.toEntity(request);
+        product.setStatus(true); // 默认上架
+        product.setStock(0);     // 默认库存为0
+        
+        return productRepository.save(product);
+    }
+    
+    public Product updateProduct(Long id, ProductRequest request) {
+        Product product = getProduct(id);
+        
+        // 检查名称是否重复（排除自己）
+        if (!product.getName().equals(request.getName()) 
+                && productRepository.existsByName(request.getName())) {
+            throw new BizException("P0001", "商品名称已存在");
+        }
+        
+        productAssembler.updateEntity(product, request);
+        return productRepository.save(product);
+    }
+    
+    @Transactional(readOnly = true)
+    public Product getProduct(Long id) {
+        return productRepository.findById(id)
+                .orElseThrow(() -> new BizException("P0002", "商品不存在"));
+    }
+    
+    @Transactional(readOnly = true)
+    public PageResult<Product> getProducts(ProductQuery query) {
+        Pageable pageable = PageRequest.of(
+                query.getPage() - 1, 
+                query.getSize(),
+                Sort.by(Sort.Direction.DESC, "createTime"));
+                
+        Page<Product> page = productRepository.findByConditions(
+                query.getCategory(), 
+                query.getKeyword(), 
+                query.getStatus(),
+                pageable);
+                
+        return new PageResult<>(page.getContent(), page.getTotalElements());
+    }
+    
+    public void updateStock(Long id, Integer quantity) {
+        Product product = getProduct(id);
+        
+        if (quantity < 0) {
+            throw new BizException("P0003", "库存数量不能为负数");
+        }
+        
+        product.setStock(quantity);
+        productRepository.save(product);
+    }
+    
+    public void updateStatus(Long id, Boolean status) {
+        Product product = getProduct(id);
+        product.setStatus(status);
+        productRepository.save(product);
+    }
+    
+    /**
+     * 扣减库存（用于下单）
+     */
+    public boolean deductStock(Long productId, Integer quantity) {
+        int updated = productRepository.deductStock(productId, quantity);
+        return updated > 0;
+    }
+    
+    /**
+     * 恢复库存（用于取消订单）
+     */
+    public void restoreStock(Long productId, Integer quantity) {
+        productRepository.restoreStock(productId, quantity);
+    }
+}
+```
+
+### 9.2 用户注册与认证模块 (User Registration & Authentication)
+
+#### 9.2.1 用户领域模型
+
+```java
+// domain/model/User.java
+@Entity
+@Table(name = "users")
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class User {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    
+    @Column(nullable = false, unique = true, length = 50)
+    private String username;                // 用户名
+    
+    @Column(nullable = false, unique = true, length = 100)
+    private String email;                    // 邮箱
+    
+    @Column(nullable = false, length = 100)
+    private String password;                 // 密码（加密后）
+    
+    @Column(length = 20)
+    private String phone;                    // 手机号
+    
+    @Column(length = 100)
+    private String nickname;                 // 昵称
+    
+    @Column(length = 500)
+    private String avatar;                   // 头像URL
+    
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private UserStatus status;               // 用户状态
+    
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private UserRole role;                   // 用户角色
+    
+    @CreatedDate
+    private LocalDateTime createTime;
+    
+    @LastModifiedDate
+    private LocalDateTime updateTime;
+    
+    @Version
+    private Long version;
+}
+
+// 用户状态枚举
+public enum UserStatus {
+    ACTIVE,      // 活跃
+    INACTIVE,    // 非活跃
+    BANNED       // 封禁
+}
+
+// 用户角色枚举
+public enum UserRole {
+    USER,        // 普通用户
+    ADMIN,       // 管理员
+    VIP          // VIP用户
+}
+```
+
+#### 9.2.2 用户注册API
+
+```java
+// api/controller/AuthController.java
+@RestController
+@RequestMapping("/api/auth")
+@Tag(name = "用户认证", description = "用户注册、登录相关接口")
+@Validated
+public class AuthController {
+    
+    @Autowired
+    private AuthService authService;
+    
+    @PostMapping("/register")
+    @Operation(summary = "用户注册", description = "新用户注册")
+    public Result<UserResponse> register(
+            @Valid @RequestBody RegisterRequest request) {
+        User user = authService.register(request);
+        return Result.success(UserResponse.from(user));
+    }
+    
+    @PostMapping("/login")
+    @Operation(summary = "用户登录", description = "用户登录获取token")
+    public Result<LoginResponse> login(
+            @Valid @RequestBody LoginRequest request) {
+        LoginResponse response = authService.login(request);
+        return Result.success(response);
+    }
+    
+    @PostMapping("/refresh")
+    @Operation(summary = "刷新token", description = "使用refresh token刷新access token")
+    public Result<TokenResponse> refresh(
+            @RequestBody RefreshTokenRequest request) {
+        TokenResponse response = authService.refreshToken(request.getRefreshToken());
+        return Result.success(response);
+    }
+    
+    @PostMapping("/logout")
+    @Operation(summary = "用户登出", description = "用户登出")
+    @PreAuthorize("isAuthenticated()")
+    public Result<Void> logout() {
+        authService.logout();
+        return Result.success();
+    }
+    
+    @GetMapping("/me")
+    @Operation(summary = "获取当前用户信息", description = "获取当前登录用户的信息")
+    @PreAuthorize("isAuthenticated()")
+    public Result<UserResponse> getCurrentUser() {
+        User user = authService.getCurrentUser();
+        return Result.success(UserResponse.from(user));
+    }
+}
+```
+
+#### 9.2.3 认证服务实现
+
+```java
+// app/service/AuthService.java
+@Service
+@Transactional
+public class AuthService {
+    
+    @Autowired
+    private UserRepository userRepository;
+    
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+    
+    @Autowired
+    private JwtTokenProvider jwtTokenProvider;
+    
+    @Autowired
+    private AuthenticationManager authenticationManager;
+    
+    public User register(RegisterRequest request) {
+        // 检查用户名是否已存在
+        if (userRepository.existsByUsername(request.getUsername())) {
+            throw new BizException("A0001", "用户名已存在");
+        }
+        
+        // 检查邮箱是否已存在
+        if (userRepository.existsByEmail(request.getEmail())) {
+            throw new BizException("A0002", "邮箱已存在");
+        }
+        
+        // 创建用户
+        User user = new User();
+        user.setUsername(request.getUsername());
+        user.setEmail(request.getEmail());
+        user.setPassword(passwordEncoder.encode(request.getPassword()));
+        user.setPhone(request.getPhone());
+        user.setNickname(request.getNickname());
+        user.setStatus(UserStatus.ACTIVE);
+        user.setRole(UserRole.USER);
+        
+        return userRepository.save(user);
+    }
+    
+    public LoginResponse login(LoginRequest request) {
+        // 认证用户
+        Authentication authentication = authenticationManager.authenticate(
+                new UsernamePasswordAuthenticationToken(
+                        request.getUsername(), 
+                        request.getPassword()
+                )
+        );
+        
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+        User user = (User) authentication.getPrincipal();
+        
+        // 生成token
+        String accessToken = jwtTokenProvider.generateAccessToken(user);
+        String refreshToken = jwtTokenProvider.generateRefreshToken(user);
+        
+        return new LoginResponse(accessToken, refreshToken, UserResponse.from(user));
+    }
+    
+    public TokenResponse refreshToken(String refreshToken) {
+        if (!jwtTokenProvider.validateRefreshToken(refreshToken)) {
+            throw new BizException("A0003", "无效的refresh token");
+        }
+        
+        String username = jwtTokenProvider.getUsernameFromRefreshToken(refreshToken);
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new BizException("A0004", "用户不存在"));
+        
+        String newAccessToken = jwtTokenProvider.generateAccessToken(user);
+        return new TokenResponse(newAccessToken);
+    }
+    
+    public void logout() {
+        SecurityContextHolder.clearContext();
+        // 可以在这里将token加入黑名单
+    }
+    
+    @Transactional(readOnly = true)
+    public User getCurrentUser() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || !authentication.isAuthenticated()) {
+            throw new BizException("A0005", "用户未登录");
+        }
+        
+        String username = authentication.getName();
+        return userRepository.findByUsername(username)
+                .orElseThrow(() -> new BizException("A0004", "用户不存在"));
+    }
+}
+```
+
+### 9.3 用户下单模块 (Order Placement)
+
+#### 9.3.1 订单领域模型
+
+```java
+// domain/model/Order.java
+@Entity
+@Table(name = "orders")
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class Order {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    
+    @Column(nullable = false, unique = true, length = 32)
+    private String orderNo;                 // 订单号
+    
+    @Column(nullable = false)
+    private Long userId;                    // 用户ID
+    
+    @Column(nullable = false, precision = 10, scale = 2)
+    private BigDecimal totalAmount;         // 订单总金额
+    
+    @Column(nullable = false, precision = 10, scale = 2)
+    private BigDecimal discountAmount;      // 优惠金额
+    
+    @Column(nullable = false, precision = 10, scale = 2)
+    private BigDecimal actualAmount;       // 实际支付金额
+    
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private OrderStatus status;             // 订单状态
+    
+    @Column(length = 200)
+    private String receiverName;             // 收货人姓名
+    
+    @Column(length = 500)
+    private String receiverAddress;          // 收货地址
+    
+    @Column(length = 20)
+    private String receiverPhone;            // 收货人电话
+    
+    @Column(length = 100)
+    private String remark;                   // 订单备注
+    
+    @CreatedDate
+    private LocalDateTime createTime;
+    
+    @LastModifiedDate
+    private LocalDateTime updateTime;
+    
+    @Version
+    private Long version;
+    
+    // 关联订单项
+    @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    private List<OrderItem> items;
+}
+
+// domain/model/OrderItem.java
+@Entity
+@Table(name = "order_items")
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class OrderItem {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    
+    @Column(nullable = false)
+    private Long orderId;                   // 订单ID
+    
+    @Column(nullable = false)
+    private Long productId;                  // 商品ID
+    
+    @Column(nullable = false, length = 100)
+    private String productName;              // 商品名称（冗余字段）
+    
+    @Column(nullable = false, precision = 10, scale = 2)
+    private BigDecimal price;               // 商品单价
+    
+    @Column(nullable = false)
+    private Integer quantity;                // 购买数量
+    
+    @Column(nullable = false, precision = 10, scale = 2)
+    private BigDecimal totalPrice;          // 小计金额
+    
+    @CreatedDate
+    private LocalDateTime createTime;
+    
+    @Version
+    private Long version;
+}
+
+// 订单状态枚举
+public enum OrderStatus {
+    PENDING_PAYMENT,    // 待支付
+    PAID,              // 已支付
+    SHIPPED,           // 已发货
+    DELIVERED,         // 已送达
+    COMPLETED,         // 已完成
+    CANCELLED          // 已取消
+}
+```
+
+#### 9.3.2 下单API实现
+
+```java
+// api/controller/OrderController.java
+@RestController
+@RequestMapping("/api/orders")
+@Tag(name = "订单管理", description = "订单相关的接口")
+@Validated
+public class OrderController {
+    
+    @Autowired
+    private OrderService orderService;
+    
+    @PostMapping
+    @Operation(summary = "创建订单", description = "用户下单创建订单")
+    @PreAuthorize("hasRole('USER')")
+    @Idempotent(expireTime = 30, info = "创建订单")
+    public Result<OrderResponse> createOrder(
+            @Valid @RequestBody CreateOrderRequest request) {
+        Order order = orderService.createOrder(request);
+        return Result.success(OrderResponse.from(order));
+    }
+    
+    @GetMapping("/{id}")
+    @Operation(summary = "查询订单", description = "根据ID查询订单详情")
+    @PreAuthorize("hasRole('USER')")
+    public Result<OrderResponse> getOrder(@PathVariable Long id) {
+        Order order = orderService.getOrder(id);
+        return Result.success(OrderResponse.from(order));
+    }
+    
+    @GetMapping
+    @Operation(summary = "订单列表", description = "分页查询用户订单列表")
+    @PreAuthorize("hasRole('USER')")
+    public Result<PageResult<OrderResponse>> getOrders(
+            @RequestParam(defaultValue = "1") Integer page,
+            @RequestParam(defaultValue = "10") Integer size,
+            @RequestParam(required = false) OrderStatus status) {
+        
+        OrderQuery query = OrderQuery.builder()
+                .page(page)
+                .size(size)
+                .status(status)
+                .userId(UserContext.getCurrentUserId())
+                .build();
+                
+        PageResult<Order> result = orderService.getOrders(query);
+        List<OrderResponse> responses = result.getData().stream()
+                .map(OrderResponse::from)
+                .collect(Collectors.toList());
+                
+        return Result.success(new PageResult<>(responses, result.getTotal()));
+    }
+    
+    @PostMapping("/{id}/cancel")
+    @Operation(summary = "取消订单", description = "取消未支付的订单")
+    @PreAuthorize("hasRole('USER')")
+    public Result<Void> cancelOrder(@PathVariable Long id) {
+        orderService.cancelOrder(id);
+        return Result.success();
+    }
+    
+    @PostMapping("/{id}/pay")
+    @Operation(summary = "支付订单", description = "支付订单")
+    @PreAuthorize("hasRole('USER')")
+    public Result<PaymentResponse> payOrder(
+            @PathVariable Long id,
+            @Valid @RequestBody PaymentRequest request) {
+        PaymentResponse response = orderService.payOrder(id, request);
+        return Result.success(response);
+    }
+    
+    @PostMapping("/{id}/confirm")
+    @Operation(summary = "确认收货", description = "确认收货")
+    @PreAuthorize("hasRole('USER')")
+    public Result<Void> confirmOrder(@PathVariable Long id) {
+        orderService.confirmOrder(id);
+        return Result.success();
+    }
+}
+```
+
+#### 9.3.3 下单服务实现
+
+```java
+// app/service/OrderService.java
+@Service
+@Transactional
+public class OrderService {
+    
+    @Autowired
+    private OrderRepository orderRepository;
+    
+    @Autowired
+    private OrderItemRepository orderItemRepository;
+    
+    @Autowired
+    private ProductRepository productRepository;
+    
+    @Autowired
+    private ProductService productService;
+    
+    @Autowired
+    private OrderAssembler orderAssembler;
+    
+    @Autowired
+    private PaymentService paymentService;
+    
+    @Autowired
+    private DistributedLockService lockService;
+    
+    public Order createOrder(CreateOrderRequest request) {
+        Long userId = UserContext.getCurrentUserId();
+        
+        // 1. 验证商品库存和价格
+        List<OrderItemRequest> itemRequests = request.getItems();
+        List<Product> products = validateAndGetProducts(itemRequests);
+        
+        // 2. 计算订单金额
+        BigDecimal totalAmount = calculateTotalAmount(products, itemRequests);
+        BigDecimal discountAmount = calculateDiscountAmount(totalAmount, request.getCouponCode());
+        BigDecimal actualAmount = totalAmount.subtract(discountAmount);
+        
+        // 3. 创建订单
+        Order order = new Order();
+        order.setOrderNo(generateOrderNo());
+        order.setUserId(userId);
+        order.setTotalAmount(totalAmount);
+        order.setDiscountAmount(discountAmount);
+        order.setActualAmount(actualAmount);
+        order.setStatus(OrderStatus.PENDING_PAYMENT);
+        order.setReceiverName(request.getReceiverName());
+        order.setReceiverAddress(request.getReceiverAddress());
+        order.setReceiverPhone(request.getReceiverPhone());
+        order.setRemark(request.getRemark());
+        
+        order = orderRepository.save(order);
+        
+        // 4. 创建订单项
+        List<OrderItem> orderItems = createOrderItems(order.getId(), products, itemRequests);
+        orderItemRepository.saveAll(orderItems);
+        
+        // 5. 扣减库存（使用分布式锁）
+        deductStockWithLock(products, itemRequests);
+        
+        // 6. 发送订单创建事件
+        OrderCreatedEvent event = new OrderCreatedEvent(order, orderItems);
+        ApplicationEventPublisher publisher = getApplicationEventPublisher();
+        publisher.publishEvent(event);
+        
+        return order;
+    }
+    
+    @Transactional(readOnly = true)
+    public Order getOrder(Long id) {
+        Long userId = UserContext.getCurrentUserId();
+        return orderRepository.findByIdAndUserId(id, userId)
+                .orElseThrow(() -> new BizException("O0001", "订单不存在"));
+    }
+    
+    @Transactional(readOnly = true)
+    public PageResult<Order> getOrders(OrderQuery query) {
+        Pageable pageable = PageRequest.of(
+                query.getPage() - 1, 
+                query.getSize(),
+                Sort.by(Sort.Direction.DESC, "createTime"));
+                
+        Page<Order> page = orderRepository.findByConditions(
+                query.getUserId(), 
+                query.getStatus(),
+                pageable);
+                
+        return new PageResult<>(page.getContent(), page.getTotalElements());
+    }
+    
+    public void cancelOrder(Long id) {
+        Order order = getOrder(id);
+        
+        // 只有待支付的订单才能取消
+        if (order.getStatus() != OrderStatus.PENDING_PAYMENT) {
+            throw new BizException("O0002", "订单状态不允许取消");
+        }
+        
+        order.setStatus(OrderStatus.CANCELLED);
+        orderRepository.save(order);
+        
+        // 恢复库存
+        restoreStock(order);
+        
+        // 发送订单取消事件
+        OrderCancelledEvent event = new OrderCancelledEvent(order);
+        getApplicationEventPublisher().publishEvent(event);
+    }
+    
+    public PaymentResponse payOrder(Long id, PaymentRequest request) {
+        Order order = getOrder(id);
+        
+        // 只有待支付的订单才能支付
+        if (order.getStatus() != OrderStatus.PENDING_PAYMENT) {
+            throw new BizException("O0003", "订单状态不允许支付");
+        }
+        
+        // 调用支付服务
+        PaymentResult paymentResult = paymentService.processPayment(
+                order.getOrderNo(), 
+                order.getActualAmount(), 
+                request.getPaymentMethod()
+        );
+        
+        if (paymentResult.isSuccess()) {
+            // 更新订单状态
+            order.setStatus(OrderStatus.PAID);
+            orderRepository.save(order);
+            
+            // 发送订单支付成功事件
+            OrderPaidEvent event = new OrderPaidEvent(order, paymentResult);
+            getApplicationEventPublisher().publishEvent(event);
+        }
+        
+        return PaymentResponse.from(paymentResult);
+    }
+    
+    public void confirmOrder(Long id) {
+        Order order = getOrder(id);
+        
+        // 只有已发货的订单才能确认收货
+        if (order.getStatus() != OrderStatus.DELIVERED) {
+            throw new BizException("O0004", "订单状态不允许确认收货");
+        }
+        
+        order.setStatus(OrderStatus.COMPLETED);
+        orderRepository.save(order);
+        
+        // 发送订单完成事件
+        OrderCompletedEvent event = new OrderCompletedEvent(order);
+        getApplicationEventPublisher().publishEvent(event);
+    }
+    
+    // 私有方法
+    private List<Product> validateAndGetProducts(List<OrderItemRequest> itemRequests) {
+        List<Long> productIds = itemRequests.stream()
+                .map(OrderItemRequest::getProductId)
+                .collect(Collectors.toList());
+                
+        List<Product> products = productRepository.findAllById(productIds);
+        
+        if (products.size() != productIds.size()) {
+            throw new BizException("O0005", "商品不存在");
+        }
+        
+        // 检查库存
+        for (Product product : products) {
+            OrderItemRequest itemRequest = itemRequests.stream()
+                    .filter(item -> item.getProductId().equals(product.getId()))
+                    .findFirst()
+                    .orElseThrow(() -> new BizException("O0006", "商品信息错误"));
+                    
+            if (product.getStock() < itemRequest.getQuantity()) {
+                throw new BizException("O0007", "商品库存不足");
+            }
+        }
+        
+        return products;
+    }
+    
+    private BigDecimal calculateTotalAmount(List<Product> products, List<OrderItemRequest> itemRequests) {
+        return products.stream()
+                .map(product -> {
+                    OrderItemRequest itemRequest = itemRequests.stream()
+                            .filter(item -> item.getProductId().equals(product.getId()))
+                            .findFirst()
+                            .orElseThrow(() -> new BizException("O0006", "商品信息错误"));
+                    return product.getPrice().multiply(BigDecimal.valueOf(itemRequest.getQuantity()));
+                })
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+    
+    private BigDecimal calculateDiscountAmount(BigDecimal totalAmount, String couponCode) {
+        // 这里可以实现优惠券逻辑
+        return BigDecimal.ZERO;
+    }
+    
+    private String generateOrderNo() {
+        return "ORD" + System.currentTimeMillis() + RandomUtils.nextInt(100, 999);
+    }
+    
+    private List<OrderItem> createOrderItems(Long orderId, List<Product> products, List<OrderItemRequest> itemRequests) {
+        return products.stream()
+                .map(product -> {
+                    OrderItemRequest itemRequest = itemRequests.stream()
+                            .filter(item -> item.getProductId().equals(product.getId()))
+                            .findFirst()
+                            .orElseThrow(() -> new BizException("O0006", "商品信息错误"));
+                            
+                    OrderItem item = new OrderItem();
+                    item.setOrderId(orderId);
+                    item.setProductId(product.getId());
+                    item.setProductName(product.getName());
+                    item.setPrice(product.getPrice());
+                    item.setQuantity(itemRequest.getQuantity());
+                    item.setTotalPrice(product.getPrice().multiply(BigDecimal.valueOf(itemRequest.getQuantity())));
+                    
+                    return item;
+                })
+                .collect(Collectors.toList());
+    }
+    
+    private void deductStockWithLock(List<Product> products, List<OrderItemRequest> itemRequests) {
+        for (Product product : products) {
+            OrderItemRequest itemRequest = itemRequests.stream()
+                    .filter(item -> item.getProductId().equals(product.getId()))
+                    .findFirst()
+                    .orElseThrow(() -> new BizException("O0006", "商品信息错误"));
+                    
+            String lockKey = "lock:product:stock:" + product.getId();
+            lockService.executeWithLock(lockKey, 5, TimeUnit.SECONDS, () -> {
+                boolean success = productService.deductStock(product.getId(), itemRequest.getQuantity());
+                if (!success) {
+                    throw new BizException("O0007", "商品库存不足");
+                }
+            });
+        }
+    }
+    
+    private void restoreStock(Order order) {
+        List<OrderItem> orderItems = orderItemRepository.findByOrderId(order.getId());
+        for (OrderItem item : orderItems) {
+            productService.restoreStock(item.getProductId(), item.getQuantity());
+        }
+    }
+}
+```
+
+### 9.4 事件驱动架构实现
+
+#### 9.4.1 订单事件定义
+
+```java
+// domain/event/OrderCreatedEvent.java
+@Data
+@AllArgsConstructor
+public class OrderCreatedEvent {
+    private final Order order;
+    private final List<OrderItem> orderItems;
+    private final LocalDateTime timestamp;
+    
+    public OrderCreatedEvent(Order order, List<OrderItem> orderItems) {
+        this.order = order;
+        this.orderItems = orderItems;
+        this.timestamp = LocalDateTime.now();
+    }
+}
+
+// domain/event/OrderPaidEvent.java
+@Data
+@AllArgsConstructor
+public class OrderPaidEvent {
+    private final Order order;
+    private final PaymentResult paymentResult;
+    private final LocalDateTime timestamp;
+    
+    public OrderPaidEvent(Order order, PaymentResult paymentResult) {
+        this.order = order;
+        this.paymentResult = paymentResult;
+        this.timestamp = LocalDateTime.now();
+    }
+}
+```
+
+#### 9.4.2 事件处理器
+
+```java
+// app/event/OrderEventHandler.java
+@Component
+@Slf4j
+public class OrderEventHandler {
+    
+    @Autowired
+    private NotificationService notificationService;
+    
+    @Autowired
+    private InventoryService inventoryService;
+    
+    @Autowired
+    private AnalyticsService analyticsService;
+    
+    @EventListener
+    @Async
+    public void handleOrderCreated(OrderCreatedEvent event) {
+        log.info("处理订单创建事件: {}", event.getOrder().getOrderNo());
+        
+        // 发送订单创建通知
+        notificationService.sendOrderCreatedNotification(event.getOrder());
+        
+        // 更新库存统计
+        inventoryService.updateInventoryStatistics(event.getOrderItems());
+        
+        // 更新销售统计
+        analyticsService.updateSalesStatistics(event.getOrder());
+    }
+    
+    @EventListener
+    @Async
+    public void handleOrderPaid(OrderPaidEvent event) {
+        log.info("处理订单支付事件: {}", event.getOrder().getOrderNo());
+        
+        // 发送支付成功通知
+        notificationService.sendPaymentSuccessNotification(event.getOrder());
+        
+        // 触发发货流程
+        // 这里可以调用物流服务
+    }
+    
+    @EventListener
+    @Async
+    public void handleOrderCancelled(OrderCancelledEvent event) {
+        log.info("处理订单取消事件: {}", event.getOrder().getOrderNo());
+        
+        // 发送订单取消通知
+        notificationService.sendOrderCancelledNotification(event.getOrder());
+    }
+    
+    @EventListener
+    @Async
+    public void handleOrderCompleted(OrderCompletedEvent event) {
+        log.info("处理订单完成事件: {}", event.getOrder().getOrderNo());
+        
+        // 发送订单完成通知
+        notificationService.sendOrderCompletedNotification(event.getOrder());
+        
+        // 更新用户积分
+        // 这里可以调用积分服务
+    }
+}
+```
+
+-----
+
+## 10. 前端技术实现 (Frontend Implementation)
+
+### 10.1 技术栈选择与版本兼容性
+
+#### 10.1.1 推荐前端技术栈
 
 | 技术类别 | 推荐技术 | 版本 | 说明 |
 |---------|---------|------|------|
