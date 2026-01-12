@@ -17,6 +17,14 @@ Design
 - [支付 Webhook 处理程序](Product/E-commerce/README-E-commerce-PaymentWebhookHandler.md)
 - [产品需求文档](Product/E-commerce/README-E-commerce-PRD.md)
 
+### PeaceOfMind
+
+- [PeaceOfMind-PRD](Product/PeaceOfMind/README-PeaceOfMind-PRD.md)
+
+### VisualManagement
+- [VisualManagement](Product/VisualManagement/README.md)
+- [PRD](Product/VisualManagement/PRD.md)
+
 # 基础设施(Infra)
 
 - [K8s](Infra/README-K8s.md)
