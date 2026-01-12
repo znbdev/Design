@@ -1,4 +1,4 @@
-Data table structure design
+Design
 =====
 
 这是一份针对电商核心业务的**深度技术设计文档**。重点聚焦在最复杂的“商品SKU体系”和“订单状态机”的数据库设计与逻辑流转上。
@@ -102,6 +102,10 @@ CREATE TABLE `order_items` (
   KEY `idx_order_no` (`order_no`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='订单明细表';
 ```
+
+### Data table structure
+
+TODO
 
 -----
 

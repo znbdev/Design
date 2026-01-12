@@ -1,4 +1,4 @@
-Front-end technology comparisonK8s
+Front-end technology comparison
 =====
 
 这是一个非常经典的问题，但在 2024/2025 年，答案不再是“谁在技术上更强”，而是**“谁更适合你的团队和项目现状”**。
